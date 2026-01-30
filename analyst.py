@@ -1,65 +1,62 @@
 import streamlit as st
 import google.generativeai as genai
 from datetime import datetime
+import time
 
 # Настройка страницы
-st.set_page_config(page_title="Gemini 3 Real-Time Analyst", page_icon="⚽", layout="wide")
-
-# Текущая дата
+st.set_page_config(page_title="Gemini Analyst Pro", page_icon="⚽", layout="wide")
 today_date = datetime.now().strftime("%d.%m.%Y")
 
-st.title("⚽ Аналитик реального времени")
-st.write(f"Режим: **Google Search Grounding** | Сегодня: {today_date}")
+st.title("⚽ Спортивный Аналитик")
+st.write(f"Сегодня: {today_date}")
 
 with st.sidebar:
     api_key = st.text_input("Введите Google API Key", type="password")
-    st.divider()
-    st.warning("ВНИМАНИЕ: Модель настроена на принудительный поиск в сети для исключения устаревших данных.")
+    st.info("При ошибке 429 подождите 1 минуту.")
 
-match_input = st.text_input("Введите матч (на сегодня или завтра):")
+match_input = st.text_input("Матч для анализа:")
 
-if st.button("🚀 ПОЛУЧИТЬ АКТУАЛЬНЫЙ ПРОГНОЗ"):
+if st.button("🚀 ЗАПУСТИТЬ АНАЛИЗ"):
     if not api_key:
         st.error("Введите API ключ!")
     elif not match_input:
-        st.warning("Введите название матча.")
+        st.warning("Введите матч.")
     else:
         try:
             genai.configure(api_key=api_key)
             
-            # Настройка инструментов: ВКЛЮЧАЕМ ПОИСК GOOGLE
-            # Это заставит модель выйти в интернет перед ответом
-            tools = [
-                {'google_search_retrieval': {}}
-            ]
-
-            model = genai.GenerativeModel(
-                model_name='gemini-3-flash-preview',
-                tools=tools # Добавляем инструмент поиска сюда
-            )
+            # Включаем поиск Google
+            tools = [{'google_search_retrieval': {}}]
             
-            with st.spinner(f'Выполняю поиск в Google по запросу "{match_input}"...'):
-                # Формируем жесткий промпт
-                query = (
-                    f"Сегодня {today_date}. Используй инструмент google_search, чтобы найти "
-                    f"результаты последних матчей, текущие травмы и новости о командах в матче {match_input}. "
-                    f"Запрещено использовать внутренние знания до 2024 года. "
-                    f"Дай прогноз только на основе найденной в интернете информации на текущую неделю января 2026 года. "
-                    f"Выдай: 1. Составы. 2. Вероятности %. 3. Прогноз счета. 4. Ставка дня."
-                )
-                
-                # Запрос (обрати внимание, здесь не нужно указывать generation_config внутри вызова, если он в модели)
-                response = model.generate_content(query)
-                
-                st.markdown("---")
-                
-                # Отображение ссылок (если модель их предоставит)
-                if response.candidates[0].grounding_metadata.search_entry_point:
-                    st.info("Анализ проведен на основе актуального поиска Google.")
-                
-                st.markdown(response.text)
-                
-        except Exception as e:
-            st.error(f"Ошибка: {str(e)}")
-            st.info("Если ваша версия библиотеки не поддерживает tools, обновите её: pip install -U google-generativeai")
+            # Пробуем сначала Gemini 3, если нет - 1.5
+            model_names = ['gemini-3-flash-preview', 'gemini-1.5-flash']
+            
+            success = False
+            for m_name in model_names:
+                try:
+                    model = genai.GenerativeModel(model_name=m_name, tools=tools)
+                    
+                    with st.spinner(f'Использую {m_name}. Ищу свежие данные...'):
+                        query = (
+                            f"Сегодня {today_date}. Используй Google Search. "
+                            f"Найди актуальные новости на ЭТУ НЕДЕЛЮ про матч {match_input}. "
+                            f"Дай прогноз: вероятности %, счет и ставку. Отвечай на русском."
+                        )
+                        response = model.generate_content(query)
+                        
+                        st.markdown("---")
+                        st.success(f"Анализ готов (Модель: {m_name})")
+                        st.markdown(response.text)
+                        success = True
+                        break # Если получилось, выходим из цикла
+                except Exception as e:
+                    if "429" in str(e):
+                        continue # Пробуем следующую модель
+                    else:
+                        raise e
+            
+            if not success:
+                st.error("Превышена квота запросов (Error 429). Пожалуйста, подождите 1-2 минуты и попробуйте снова.")
 
+        except Exception as e:
+            st.error(f"Произошла ошибка: {str(e)}")
